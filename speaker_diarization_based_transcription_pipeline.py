@@ -39,8 +39,9 @@ class SpeechProcessingPipeline:
 
     def convert_audio_to_wav(self):
         """Converts audio file to 16kHz mono WAV format if it's not already a WAV file."""
-        output_path = self.input_audio.with_suffix(".wav")
-
+        # output_path = self.input_audio.with_suffix(".wav")
+        output_path = f"{self.audio_stem}.wav"
+        
         if self.input_audio.suffix == ".wav":
             logging.info(f"File is already in WAV format: {self.input_audio}")
             self.wav_file = str(output_path)
