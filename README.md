@@ -11,4 +11,7 @@
     2. Reads the **RTTM file** and extracts **speaker segments** (start time, end time, speaker ID).
     3. Matches each transcript segment with the **most overlapping speaker segment** to assign speaker labels.
     4. Formats the transcript by prefixing each speech segment with its assigned speaker.
-5. Saves the final **diarized transcript** to `diarized_transcript.txt`.
+    5. Saves the final **diarized transcript** to `diarized_transcript.txt`.
+
+## To run the pipeline just follow just like the example below:
+`python speaker_diarization_based_transcription_pipeline.py Meeting2_manager-employee.mp3 --num_speakers 2 --model medium`
