@@ -13,8 +13,8 @@ device: null # can specify a specific device, i.e: cuda:1 (default cuda if cuda 
 verbose: True # enable additional logging
 
 diarizer:
-  manifest_filepath: ???
-  out_dir: ???
+  manifest_filepath: /kaggle/working/manifest_file.json
+  out_dir: /kaggle/working/
   oracle_vad: False # If True, uses RTTM files provided in the manifest file to get speech activity (VAD) timestamps
   collar: 0.25 # Collar value for scoring
   ignore_overlap: True # Consider or ignore overlap segments while scoring
