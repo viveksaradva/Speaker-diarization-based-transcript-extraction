@@ -18,6 +18,7 @@ diarizer:
   oracle_vad: False # If True, uses RTTM files provided in the manifest file to get speech activity (VAD) timestamps
   collar: 0.25 # Collar value for scoring
   ignore_overlap: True # Consider or ignore overlap segments while scoring
+  out_json: True
 
   vad:
     model_path: vad_multilingual_marblenet # .nemo local model path or pretrained VAD model name 
