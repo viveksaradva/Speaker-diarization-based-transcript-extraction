@@ -1,7 +1,9 @@
 import os
+import torchaudio
+import tempfile
+from transformers import pipeline
 import glob
 import json
-import shutil
 import subprocess
 import urllib.request
 import logging
@@ -39,41 +41,40 @@ class SpeechProcessingPipeline:
 
     def convert_audio_to_wav(self):
         """Converts audio file to 16kHz mono WAV format if it's not already a WAV file."""
-        # output_path = self.input_audio.with_suffix(".wav")
         output_path = f"{self.audio_stem}.wav"
         
         if self.input_audio.suffix == ".wav":
-            logging.info(f"File is already in WAV format: {self.input_audio}")
-            self.wav_file = str(output_path)
+            self.wav_file = str(self.input_audio)
+            logging.info(f"File is already in WAV format: {self.wav_file}")
             return
-        
+
+
         logging.info(f"Converting {self.input_audio} to WAV format...")
         command = f"ffmpeg -i {self.input_audio} -ar 16000 -ac 1 {output_path} -y"
         subprocess.run(command, shell=True, check=True)
         
         self.wav_file = str(output_path)
 
-    def transcribe_with_whisper(self):
-        """Transcribes speech from the WAV file using Whisper and saves as JSON."""
-        if not self.wav_file:
-            raise RuntimeError("WAV file not found. Ensure audio conversion was successful.")
-
-        output_dir = Path("whisper_output")
-        output_dir.mkdir(exist_ok=True)
-        original_json = output_dir / f"{self.audio_stem}.json"
-        renamed_json = output_dir / f"{self.audio_stem}_transcript.json"
-
-        logging.info(f"Running Whisper transcription with model `{self.model}`...")
-        command = f"whisper {self.wav_file} --model {self.model} --output_format json --output_dir {output_dir}"
-        subprocess.run(command, shell=True, check=True)
-
-        if original_json.exists():
-            shutil.move(original_json, renamed_json)
-            logging.info(f"Transcription saved as: {renamed_json}")
-            self.transcript_json = str(renamed_json)
-        else:
-            raise FileNotFoundError("Whisper did not generate the expected JSON file.")
-
+    def parse_rttm(self):
+        """Parses RTTM file and returns a list of speaker segments."""
+        if not self.rttm_file:
+            raise FileNotFoundError("RTTM file not found. Run diarization first.")
+        
+        segments = []
+        with open(self.rttm_file, "r") as file:
+            for line in file:
+                if line.strip() == "":
+                    continue
+                parts = line.strip().split()
+                if len(parts) < 8 or parts[0] != "SPEAKER":
+                    continue
+                start = float(parts[3])
+                duration = float(parts[4])
+                end = start + duration
+                speaker = parts[7]
+                segments.append({"speaker": speaker, "start": start, "end": end})
+        return segments
+ 
     @staticmethod
     def ensure_diarization_config():
         """Ensures diarization configuration file is available by downloading if necessary."""
@@ -129,61 +130,64 @@ class SpeechProcessingPipeline:
         self.rttm_file = matching_files[0]
         logging.info(f"Found RTTM file: {self.rttm_file}")
 
-    def align_transcription_with_speakers(self):
-        """Aligns the Whisper transcript with speaker diarization results."""
-        if not (self.transcript_json and self.rttm_file):
-            raise RuntimeError("Ensure both transcription and diarization are complete before alignment.")
+    def transcribe_diarized_segments(self):
+        """Transcribes individual speaker segments using Hugging Face Whisper ASR."""
+        if not self.rttm_file:
+            raise RuntimeError("Diarization must be completed before segment-level transcription.")
 
-        output_txt = "diarized_transcript.txt"
 
-        # Load Whisper transcript
-        with open(self.transcript_json, "r") as file:
-            whisper_data = json.load(file)
+        # Load audio
+        waveform, sample_rate = torchaudio.load(self.wav_file)
 
-        whisper_segments = [
-            {"start": seg["start"], "end": seg["end"], "text": seg["text"]}
-            for seg in whisper_data["segments"]
-        ]
+        # Parse speaker segments
+        speaker_segments = self.parse_rttm()
 
-        # Load RTTM file
-        with open(self.rttm_file, "r") as file:
-            rttm_contents = file.readlines()
+        # Load ASR model
+        logging.info("Loading Whisper ASR pipeline (transformers)...")
+        asr = pipeline("automatic-speech-recognition", model=f"openai/whisper-{self.model}")
 
-        speaker_segments = []
-        for line in rttm_contents:
-            parts = line.strip().split()
-            if len(parts) < 8 or parts[0] != "SPEAKER":
-                continue
-            start_time = float(parts[3])
-            duration = float(parts[4])
-            end_time = start_time + duration
-            speaker = parts[7]
-            speaker_segments.append({"start": start_time, "end": end_time, "speaker": speaker})
+        results = []
+        logging.info("Transcribing each speaker segment...")
 
-        # Assign speakers to transcript
-        def assign_speakers():
-            result = []
-            for seg in whisper_segments:
-                best_match = max(speaker_segments, key=lambda spk: max(0, min(seg["end"], spk["end"]) - max(seg["start"], spk["start"])), default=None)
-                speaker = best_match["speaker"] if best_match else "Unknown"
-                result.append(f"[{speaker}] {seg['text']}")
-            return "\n".join(result)
+        for segment in speaker_segments:
+            speaker = segment["speaker"]
+            start_time = segment["start"]
+            end_time = segment["end"]
 
-        formatted_transcript = assign_speakers()
+            start_sample = int(start_time * sample_rate)
+            end_sample = int(end_time * sample_rate)
+            audio_segment = waveform[:, start_sample:end_sample]
 
+            # Save and transcribe temporary chunk
+            with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+                torchaudio.save(tmp.name, audio_segment, sample_rate)
+                transcription_result = asr(tmp.name)
+                transcription = transcription_result.get("text", "").strip()
+
+            results.append({
+                "speaker": speaker,
+                "start": start_time,
+                "end": end_time,
+                "transcription": transcription
+            })
+
+        # Save result to a text file
+        output_txt = f"{self.audio_stem}_segment_transcript.txt"
         with open(output_txt, "w") as f:
-            f.write(formatted_transcript)
+            for res in results:
+                line = f"{res['speaker']}: {res['transcription']}"
+                print(line)
+                f.write(line + "\n")
 
-        logging.info(f"Diarized transcript saved to {output_txt}")
+        logging.info(f"Speaker-segmented transcript saved to: {output_txt}")
         self.diarized_transcript = output_txt
 
     def run_pipeline(self):
         """Runs the complete audio processing pipeline."""
         self.convert_audio_to_wav()
-        self.transcribe_with_whisper()
         self.perform_speaker_diarization()
         self.find_rttm_file()
-        self.align_transcription_with_speakers()
+        self.transcribe_diarized_segments()
         logging.info("Pipeline Complete! Diarized transcript is ready.")
 
 
@@ -196,5 +200,5 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, default="medium", help="Whisper model size")
 
     args = parser.parse_args()
-    pipeline = SpeechProcessingPipeline(args.input_audio, args.num_speakers, args.model)
-    pipeline.run_pipeline()
+    speech_pipeline = SpeechProcessingPipeline(args.input_audio, args.num_speakers, args.model)
+    speech_pipeline.run_pipeline()
