@@ -135,7 +135,6 @@ class SpeechProcessingPipeline:
         if not self.rttm_file:
             raise RuntimeError("Diarization must be completed before segment-level transcription.")
 
-
         # Load audio
         waveform, sample_rate = torchaudio.load(self.wav_file)
 
@@ -171,25 +170,20 @@ class SpeechProcessingPipeline:
                 "transcription": transcription
             })
 
-        # Save result to a text file
-        output_txt = f"{self.audio_stem}_segment_transcript.txt"
-        with open(output_txt, "w") as f:
-            for res in results:
-                line = f"{res['speaker']}: {res['transcription']}"
-                print(line)
-                f.write(line + "\n")
+        self.diarized_transcript = results
 
-        logging.info(f"Speaker-segmented transcript saved to: {output_txt}")
-        self.diarized_transcript = output_txt
+        return results
 
     def run_pipeline(self):
         """Runs the complete audio processing pipeline."""
         self.convert_audio_to_wav()
         self.perform_speaker_diarization()
         self.find_rttm_file()
+        self.diarized_transcript = self.transcribe_diarized_segments()
         self.transcribe_diarized_segments()
         logging.info("Pipeline Complete! Diarized transcript is ready.")
 
+        return self.diarized_transcript
 
 if __name__ == "__main__":
     import argparse
