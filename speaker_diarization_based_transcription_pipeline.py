@@ -180,7 +180,7 @@ class SpeechProcessingPipeline:
         self.perform_speaker_diarization()
         self.find_rttm_file()
         self.diarized_transcript = self.transcribe_diarized_segments()
-        self.transcribe_diarized_segments()
+        self.diarized_transcript
         logging.info("Pipeline Complete! Diarized transcript is ready.")
 
         return self.diarized_transcript
