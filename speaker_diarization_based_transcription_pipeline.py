@@ -179,8 +179,7 @@ class SpeechProcessingPipeline:
         self.convert_audio_to_wav()
         self.perform_speaker_diarization()
         self.find_rttm_file()
-        self.diarized_transcript = self.transcribe_diarized_segments()
-        self.diarized_transcript
+        self.transcribe_diarized_segments()
         logging.info("Pipeline Complete! Diarized transcript is ready.")
 
         return self.diarized_transcript
